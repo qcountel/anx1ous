@@ -1,0 +1,365 @@
+﻿#include "Config/Config.h"
+
+#include <Windows.h>
+#include <ShlObj.h>
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <nlohmann/json.hpp>
+
+#include "Module/ModuleManager.h"
+#include "Utils/Logger.h"
+
+using json = nlohmann::json;
+
+namespace anx1ous {
+namespace {
+
+constexpr int kConfigVersion = 3;
+
+struct DefaultChange {
+    const char* module;
+    const char* setting;
+    int version;
+};
+
+constexpr DefaultChange kDefaultChanges[] = {
+    {"ClickGui", "Keybind", 3},
+};
+
+bool supersededDefault(const std::string& module, const std::string& setting, int fileVersion) {
+    for (const DefaultChange& change : kDefaultChanges) {
+        if (fileVersion < change.version && module == change.module && setting == change.setting)
+            return true;
+    }
+    return false;
+}
+
+json serialise(const Setting& setting) {
+    switch (setting.type()) {
+    case Setting::Type::Bool:    return static_cast<const BoolSetting&>(setting).value;
+    case Setting::Type::Int:     return static_cast<const IntSetting&>(setting).value;
+    case Setting::Type::Float:   return static_cast<const FloatSetting&>(setting).value;
+    case Setting::Type::Enum:    return static_cast<const EnumSetting&>(setting).selected();
+    case Setting::Type::Keybind: return static_cast<const KeybindSetting&>(setting).value;
+    case Setting::Type::Text:    return static_cast<const TextSetting&>(setting).value;
+    case Setting::Type::Colour: {
+        const auto& colour = static_cast<const ColourSetting&>(setting).value;
+        return json::array({colour.r, colour.g, colour.b, colour.a});
+    }
+    case Setting::Type::List: {
+        json entries = json::array();
+        for (const auto& entry : static_cast<const ListSetting&>(setting).entries)
+            entries.push_back(json{{"from", entry.from}, {"to", entry.to}});
+        return entries;
+    }
+    }
+    return nullptr;
+}
+
+void deserialise(Setting& setting, const json& value) {
+    try {
+        switch (setting.type()) {
+        case Setting::Type::Bool:
+            static_cast<BoolSetting&>(setting).value = value.get<bool>();
+            break;
+        case Setting::Type::Int:
+            static_cast<IntSetting&>(setting).set(value.get<int>());
+            break;
+        case Setting::Type::Float:
+            static_cast<FloatSetting&>(setting).set(value.get<float>());
+            break;
+        case Setting::Type::Keybind:
+            static_cast<KeybindSetting&>(setting).value = value.get<int>();
+            break;
+        case Setting::Type::Text:
+            static_cast<TextSetting&>(setting).value = value.get<std::string>();
+            break;
+        case Setting::Type::List: {
+            auto& target = static_cast<ListSetting&>(setting);
+            target.entries.clear();
+            for (const auto& item : value) {
+                ListSetting::Entry entry;
+                entry.from = item.value("from", std::string{});
+                entry.to = item.value("to", std::string{});
+                if (!entry.from.empty() || !entry.to.empty())
+                    target.entries.push_back(std::move(entry));
+            }
+            break;
+        }
+        case Setting::Type::Enum: {
+            auto& target = static_cast<EnumSetting&>(setting);
+            const auto name = value.get<std::string>();
+            for (size_t i = 0; i < target.options.size(); ++i) {
+                if (target.options[i] == name) {
+                    target.value = static_cast<int>(i);
+                    break;
+                }
+            }
+            break;
+        }
+        case Setting::Type::Colour: {
+            auto& target = static_cast<ColourSetting&>(setting);
+            if (value.is_array() && value.size() == 4) {
+                target.value = {value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
+                                value[3].get<float>()};
+            }
+            break;
+        }
+        }
+    } catch (const json::exception& error) {
+        LOG_WARN("Config", "setting '{}' could not be read: {}", setting.name(), error.what());
+    }
+}
+
+}
+
+Config& Config::get() {
+    static Config instance;
+    return instance;
+}
+
+std::filesystem::path Config::directory() {
+    PWSTR local = nullptr;
+    std::filesystem::path dir;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
+        dir = std::filesystem::path(local) / L"anx1ous" / L"configs";
+        CoTaskMemFree(local);
+    } else {
+        dir = std::filesystem::temp_directory_path() / L"anx1ous" / L"configs";
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    return dir;
+}
+
+std::string Config::sanitise(const std::string& name) {
+    std::string result;
+    for (const char c : name) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '_' || c == '-')
+            result.push_back(c);
+        if (result.size() >= 32)
+            break;
+    }
+
+    const size_t first = result.find_first_not_of(' ');
+    const size_t last = result.find_last_not_of(' ');
+    if (first == std::string::npos)
+        return {};
+    return result.substr(first, last - first + 1);
+}
+
+std::filesystem::path Config::pathFor(const std::string& name) const {
+    return directory() / (name + ".json");
+}
+
+bool Config::exists(const std::string& name) const {
+    std::error_code ec;
+    return std::filesystem::exists(pathFor(name), ec);
+}
+
+std::vector<std::string> Config::list() const {
+    std::vector<std::string> names;
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(directory(), ec)) {
+        if (!entry.is_regular_file(ec) || entry.path().extension() != ".json")
+            continue;
+        names.push_back(entry.path().stem().string());
+    }
+
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+std::filesystem::path activeMarkerPath() { return Config::directory() / "active.txt"; }
+
+void Config::writeActiveMarker() const {
+    std::ofstream file(activeMarkerPath());
+    if (file)
+        file << m_current;
+}
+
+std::string Config::readActiveMarker() const {
+    std::ifstream file(activeMarkerPath());
+    std::string name;
+    if (file)
+        std::getline(file, name);
+    return sanitise(name);
+}
+
+void Config::loadActive() {
+    const std::string name = readActiveMarker();
+    if (!name.empty() && exists(name)) {
+        load(name);
+        return;
+    }
+    load("default");
+}
+
+bool Config::create(const std::string& rawName) {
+    const std::string name = sanitise(rawName);
+    if (name.empty()) {
+        LOG_WARN("Config", "refusing to create a config with an empty name");
+        return false;
+    }
+    if (exists(name)) {
+        LOG_WARN("Config", "config '{}' already exists", name);
+        return false;
+    }
+
+    m_current = name;
+    writeActiveMarker();
+    return save(name);
+}
+
+bool Config::remove(const std::string& name) {
+    std::error_code ec;
+    if (!std::filesystem::remove(pathFor(name), ec)) {
+        LOG_WARN("Config", "could not delete '{}'", name);
+        return false;
+    }
+
+    LOG_INFO("Config", "deleted '{}'", name);
+
+    if (m_current == name) {
+        m_current = "default";
+        writeActiveMarker();
+    }
+    return true;
+}
+
+bool Config::rename(const std::string& from, const std::string& to) {
+    const std::string oldName = sanitise(from);
+    const std::string newName = sanitise(to);
+    if (oldName.empty() || newName.empty()) {
+        LOG_WARN("Config", "refusing to rename '{}' to an empty name", from);
+        return false;
+    }
+    if (!exists(oldName)) {
+        LOG_WARN("Config", "cannot rename '{}', there is no such config", oldName);
+        return false;
+    }
+    if (oldName != newName && exists(newName)) {
+        LOG_WARN("Config", "config '{}' already exists", newName);
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::rename(pathFor(oldName), pathFor(newName), ec);
+    if (ec) {
+        LOG_WARN("Config", "could not rename '{}' to '{}': {}", oldName, newName, ec.message());
+        return false;
+    }
+
+    LOG_INFO("Config", "renamed '{}' to '{}'", oldName, newName);
+
+    if (m_current == oldName) {
+        m_current = newName;
+        writeActiveMarker();
+    }
+    return true;
+}
+
+bool Config::save(const std::string& requested) {
+    const std::string name = requested.empty() ? m_current : sanitise(requested);
+    if (name.empty())
+        return false;
+
+    json root;
+    root["version"] = kConfigVersion;
+
+    for (const auto& module : ModuleManager::get().modules()) {
+        json entry;
+        entry["enabled"] = module->persistEnabled() && module->enabled();
+
+        json settings = json::object();
+        for (const auto& setting : module->settings())
+            settings[setting->name()] = serialise(*setting);
+        entry["settings"] = std::move(settings);
+
+        root["modules"][module->name()] = std::move(entry);
+    }
+
+    const auto path = pathFor(name);
+    std::ofstream file(path);
+    if (!file) {
+        LOG_ERROR("Config", "cannot write {}", path.string());
+        return false;
+    }
+
+    file << root.dump(2);
+    LOG_INFO("Config", "saved '{}'", name);
+
+    m_current = name;
+    writeActiveMarker();
+    return true;
+}
+
+bool Config::load(const std::string& requested) {
+    const std::string name = sanitise(requested);
+    if (name.empty())
+        return false;
+
+    const auto path = pathFor(name);
+    std::ifstream file(path);
+    if (!file) {
+        LOG_INFO("Config", "no config at {}, using defaults", path.string());
+        return false;
+    }
+
+    json root;
+    try {
+        file >> root;
+    } catch (const json::exception& error) {
+        LOG_ERROR("Config", "{} is not valid JSON: {}", path.string(), error.what());
+        return false;
+    }
+
+    const int version = root.value("version", 0);
+    if (version <= 0 || version > kConfigVersion) {
+
+        LOG_WARN("Config", "{} declares version {}, which this build cannot read (expected 1..{})",
+                 path.string(), version, kConfigVersion);
+        return false;
+    }
+    if (version < kConfigVersion) {
+        LOG_INFO("Config", "{} is version {}; reading it and taking the new defaults for anything "
+                           "that moved since",
+                 path.string(), version);
+    }
+
+    const auto modules = root.find("modules");
+    if (modules == root.end())
+        return false;
+
+    for (const auto& module : ModuleManager::get().modules()) {
+        const auto entry = modules->find(module->name());
+        if (entry == modules->end())
+            continue;
+
+        const auto settings = entry->find("settings");
+        if (settings != entry->end()) {
+            for (const auto& setting : module->settings()) {
+                if (supersededDefault(module->name(), setting->name(), version))
+                    continue;
+
+                const auto value = settings->find(setting->name());
+                if (value != settings->end())
+                    deserialise(*setting, *value);
+            }
+        }
+
+        if (module->persistEnabled())
+            module->setEnabled(entry->value("enabled", false));
+    }
+
+    m_current = name;
+    writeActiveMarker();
+
+    LOG_INFO("Config", "loaded '{}'", name);
+    return true;
+}
+
+}

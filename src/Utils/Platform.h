@@ -1,0 +1,31 @@
+#pragma once
+
+#include <Windows.h>
+
+namespace anx1ous::platform {
+
+HWND gameWindow();
+
+bool gameFocused();
+
+SIZE clientSize();
+
+DWORD gameWindowThread();
+
+bool attachToGameInput();
+void detachFromGameInput();
+
+bool holdExecution();
+void releaseExecution();
+
+struct ForegroundInfo {
+    HWND window = nullptr;
+    DWORD processId = 0;
+    char className[128]{};
+};
+
+ForegroundInfo foregroundInfo();
+
+bool screenToGame(POINT& point);
+
+}

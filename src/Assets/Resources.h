@@ -1,0 +1,4 @@
+#pragma once
+
+#define ANX1OUS_ASSET_ASUKA   101
+#define ANX1OUS_ASSET_AYANAMI 102

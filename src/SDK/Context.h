@@ -1,0 +1,32 @@
+#pragma once
+
+#include "SDK/ClientInstance.h"
+#include "SDK/Entity.h"
+#include "SDK/Level.h"
+#include "SDK/Types.h"
+
+namespace anx1ous::sdk {
+
+struct Context {
+    static Context& get();
+
+    ClientInstance* client = nullptr;
+    LocalPlayer* localPlayer = nullptr;
+    GameMode* gameMode = nullptr;
+    Level* level = nullptr;
+    ScreenContext* screenContext = nullptr;
+
+    bool inGame() const { return localPlayer != nullptr && level != nullptr; }
+
+    bool worldInteractive() const { return client && inGame() && client->mouseGrabbed(); }
+
+    std::string currentScreenName() const;
+
+    Font* font() const { return client ? client->font() : nullptr; }
+
+    void chat(const std::string& message) const;
+
+    void reset();
+};
+
+}
