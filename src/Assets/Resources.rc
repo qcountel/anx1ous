@@ -3,3 +3,5 @@
 // Paths are relative to this file: src/Assets -> assets/
 ANX1OUS_ASSET_ASUKA   RCDATA "..\\..\\assets\\asuka.png"
 ANX1OUS_ASSET_AYANAMI RCDATA "..\\..\\assets\\ayanami.png"
+ANX1OUS_ASSET_REM     RCDATA "..\\..\\assets\\rem.png"
+ANX1OUS_ASSET_YUKI    RCDATA "..\\..\\assets\\yuki.png"

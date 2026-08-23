@@ -3,13 +3,24 @@
 #include <Windows.h>
 
 #include "Event/Events.h"
+#include "GUI/CharacterArt.h"
 #include "GUI/ClickGui.h"
 
 namespace anx1ous::modules {
+namespace {
+
+std::vector<std::string> characterOptions() {
+    std::vector<std::string> options{"None"};
+    for (const auto& art : gui::kCharacterArt)
+        options.emplace_back(art.label);
+    return options;
+}
+
+}
 
 ClickGuiModule::ClickGuiModule()
     : Module("ClickGui", "Opens the settings interface", Category::Client, VK_F12) {
-    m_character = addEnum("Character", "Artwork behind the module list", {"None", "Rei", "Asuka"}, 1);
+    m_character = addEnum("Character", "Artwork behind the module list", characterOptions(), 1);
     m_characterOpacity = addFloat("Character opacity", "How strongly the artwork shows", 0.40f, 0.1f,
                                   1.0f, 0.05f);
     m_characterOpacity->onlyIf([this] { return !m_character->is("None"); });

@@ -101,5 +101,3 @@ if(ANX1OUS_OBFUSCATE)
 
     message(STATUS "anx1ous: obfuscation ON (render + GameHooks kept clean for FPS)")
 endif()
-
-add_subdirectory(injector)

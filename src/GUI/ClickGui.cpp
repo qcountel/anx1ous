@@ -5,9 +5,10 @@
 #include <cctype>
 #include <cmath>
 #include <format>
+#include <iterator>
 
-#include "Assets/Resources.h"
 #include "Config/Config.h"
+#include "GUI/CharacterArt.h"
 #include "Input/InputManager.h"
 #include "Module/ModuleManager.h"
 #include "Module/Modules/Modules.h"
@@ -276,7 +277,12 @@ int ClickGui::activeCharacter() const {
     if (!choice || choice->is("None"))
         return 0;
 
-    return choice->is("Asuka") ? ANX1OUS_ASSET_ASUKA : ANX1OUS_ASSET_AYANAMI;
+    // index 0 is "None"; kCharacterArt[0] lines up with index 1, and so on.
+    const size_t index = static_cast<size_t>(choice->value) - 1;
+    if (index >= std::size(kCharacterArt))
+        return 0;
+
+    return kCharacterArt[index].resourceId;
 }
 
 ClickGui::Layout ClickGui::computeLayout(const Vec2& screenSize, float amount) const {
