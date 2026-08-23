@@ -26,11 +26,7 @@ Mousestrokes::Mousestrokes()
     m_colour->onlyIf([this] { return !m_rainbow->value; });
     m_rounding = addFloat("Rounding", "Corner radius", 9.0f, 0.0f, 16.0f, 0.5f);
 
-    m_posX = addFloat("PosX", "", -1.0f, -1.0f, 1.0f, 0.0f);
-    m_posY = addFloat("PosY", "", -1.0f, -1.0f, 1.0f, 0.0f);
-    m_posX->onlyIf([] { return false; });
-    m_posY->onlyIf([] { return false; });
-    m_drag.bind(m_posX, m_posY);
+    addHudPosition(m_drag);
 
     listen<Render2DEvent>(&Mousestrokes::onRender);
     setEnabled(false);

@@ -58,6 +58,12 @@ private:
     void renderRail(const Layout& layout, float amount);
     void renderCards(const Layout& layout, float amount);
 
+    // Full-screen HUD layout mode: the window steps aside and every active HUD
+    // element can be dragged straight to where it should live.
+    void renderHudEditor(const Vec2& screenSize, float scale);
+    void beginHudEditor();
+    void endHudEditor();
+
     void renderScrollbar(const Rect& view, const ScrollState& scroll, float contentHeight,
                          float scale, float amount);
     float renderCard(Module& module, const Rect& card, float scale, int index);
@@ -93,6 +99,8 @@ private:
         Category,
         Expander,
         ConfigsTab,
+        HudEditorTab,
+        HudEditorDone,
         ConfigLoad,
         ConfigSave,
         ConfigDelete,
@@ -134,6 +142,10 @@ private:
 
     enum class Page { Modules, Configs };
     Page m_page = Page::Modules;
+
+    bool m_hudEditor = false;
+    Module* m_hudDragging = nullptr;
+    Vec2 m_hudGrab{};
 
     void renderConfigs(const Layout& layout, float amount);
     bool renderButton(const Rect& area, const std::string& label, float scale, const Colour& tint);

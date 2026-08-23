@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "Event/Events.h"
+#include "GUI/HudDrag.h"
 #include "Utils/Logger.h"
 
 namespace anx1ous {
@@ -35,6 +36,7 @@ Module::Module(std::string name, std::string description, Category category, int
 
 Module::~Module() {
     EventBus::get().unsubscribe(this);
+    hud::unregisterElement(this);
 }
 
 std::string Module::displayName() const {
@@ -96,6 +98,18 @@ ListSetting* Module::addList(std::string name, std::string description, std::str
                              std::string toHint) {
     return add<ListSetting>(std::move(name), std::move(description), std::move(fromHint),
                             std::move(toHint));
+}
+
+void Module::addHudPosition(hud::Draggable& drag, float defaultX, float defaultY) {
+    auto* x = addFloat("PosX", "", defaultX, -1.0f, 1.0f, 0.0f);
+    auto* y = addFloat("PosY", "", defaultY, -1.0f, 1.0f, 0.0f);
+
+    // Positions are dragged, never edited as sliders, so keep them out of the UI.
+    x->onlyIf([] { return false; });
+    y->onlyIf([] { return false; });
+
+    drag.bind(x, y);
+    hud::registerElement(this, &drag);
 }
 
 }

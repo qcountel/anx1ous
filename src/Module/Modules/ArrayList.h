@@ -40,8 +40,6 @@ private:
     FloatSetting* m_speed;
     EnumSetting* m_accent;
 
-    FloatSetting* m_posX;
-    FloatSetting* m_posY;
     hud::Draggable m_drag;
 };
 

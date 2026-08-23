@@ -24,8 +24,6 @@ private:
     ColourSetting* m_colour;
     FloatSetting* m_rounding;
 
-    FloatSetting* m_posX;
-    FloatSetting* m_posY;
     hud::Draggable m_drag;
 
     input::ClickCounter m_lmb, m_rmb;

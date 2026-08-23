@@ -9,6 +9,8 @@
 
 #include "Config/Config.h"
 #include "GUI/CharacterArt.h"
+#include "GUI/HudDrag.h"
+#include "GUI/HudStyle.h"
 #include "Input/InputManager.h"
 #include "Module/ModuleManager.h"
 #include "Module/Modules/Modules.h"
@@ -234,6 +236,9 @@ void ClickGui::open() {
 void ClickGui::close() {
     commitText();
 
+    if (m_hudEditor)
+        endHudEditor();
+
     m_open = false;
     m_draggingSlider = nullptr;
     m_draggingColour = 0;
@@ -336,6 +341,15 @@ void ClickGui::render(Render2DEvent& event) {
     const Layout layout = computeLayout(event.screenSize, amount);
     m_contentSlide = (1.0f - contents) * kContentSlide * layout.scale;
 
+    // The HUD editor takes over the whole screen: the menu window would only be
+    // in the way of the elements being arranged behind it.
+    if (m_hudEditor) {
+        renderHudEditor(event.screenSize, layout.scale);
+        renderTooltip(event.screenSize, layout.scale);
+        renderCursor(layout.scale);
+        return;
+    }
+
     DrawUtils::fill({0.0f, 0.0f, event.screenSize.x, event.screenSize.y},
                     Colour::rgb(0x05070C, 0.55f * amount));
 
@@ -407,8 +421,6 @@ void ClickGui::renderChrome(const Layout& layout, float amount) {
                     Weight::SemiBold);
 
     const float titleWidth = DrawUtils::textWidth(brand, 21.0f * scale, Weight::SemiBold);
-    DrawUtils::text("1.1.5", {title.x + titleWidth + 8.0f * scale, title.y + 6.0f * scale},
-                    theme.textDim.withAlpha(amount), 12.0f * scale, Weight::Medium);
 
     DrawUtils::fill({layout.window.left + kPadding * scale, layout.header.bottom - 1.0f * scale,
                      layout.window.right - kPadding * scale, layout.header.bottom},
@@ -629,6 +641,161 @@ void ClickGui::renderRail(const Layout& layout, float amount) {
                     selected ? Weight::SemiBold : Weight::Medium);
 
     m_hits.push_back({item, HitKind::ConfigsTab, nullptr, nullptr, Category::Client, {}});
+
+    y += itemHeight + 3.0f * scale;
+
+    const Rect hudItem{layout.rail.left + kPadding * scale, y,
+                       layout.rail.right - kPadding * 0.5f * scale, y + itemHeight};
+
+    const size_t hudCount = [] {
+        size_t count = 0;
+        for (const auto& element : hud::elements()) {
+            if (element.module && element.module->enabled())
+                ++count;
+        }
+        return count;
+    }();
+
+    const bool hudHovered = hudItem.contains(m_cursor);
+    Animated& hudGlow = animation(&m_hudEditor);
+    hudGlow.set(hudHovered ? 0.4f : 0.0f);
+    const float hudLight = hudGlow.update(theme.animationSpeed);
+
+    if (hudLight > 0.01f) {
+        DrawUtils::fill(hudItem, Colour::rgb(0xFFFFFF, 0.07f * hudLight * amount), 8.0f * scale);
+        const float pillHeight = hudItem.height() * 0.5f * hudLight;
+        const float centre = hudItem.top + hudItem.height() * 0.5f;
+        DrawUtils::fill({hudItem.left - 6.0f * scale, centre - pillHeight * 0.5f,
+                         hudItem.left - 3.0f * scale, centre + pillHeight * 0.5f},
+                        theme.menuAccent().withAlpha(hudLight * amount), 2.0f * scale);
+    }
+
+    DrawUtils::text("Edit HUD", {hudItem.left + 12.0f * scale, hudItem.top + 9.0f * scale},
+                    theme.textDim.withAlpha(amount), 14.0f * scale, Weight::Medium);
+
+    if (hudCount > 0) {
+        DrawUtils::text(std::to_string(hudCount),
+                        {hudItem.right - 10.0f * scale, hudItem.top + 10.0f * scale},
+                        theme.textDim.withAlpha(0.6f * amount), 12.0f * scale, Weight::Regular,
+                        Align::Right);
+    }
+
+    m_hits.push_back({hudItem, HitKind::HudEditorTab, nullptr, nullptr, Category::Client, {}});
+}
+
+void ClickGui::beginHudEditor() {
+    m_hudEditor = true;
+    m_hudDragging = nullptr;
+    m_search.clear();
+    m_searching = false;
+    m_openColour = nullptr;
+    m_draggingSlider = nullptr;
+    m_bindingModule = nullptr;
+    hud::setEditorActive(true);
+}
+
+void ClickGui::endHudEditor() {
+    m_hudEditor = false;
+    m_hudDragging = nullptr;
+    hud::setEditorActive(false);
+
+    // Positions live in the module settings, so persisting them is just a save.
+    Config::get().save();
+}
+
+void ClickGui::renderHudEditor(const Vec2& screenSize, float scale) {
+    const Theme& theme = Theme::get();
+
+    // Dim the world a little, but far less than the menu does: the whole point
+    // is to see the HUD elements clearly while arranging them.
+    DrawUtils::fill({0.0f, 0.0f, screenSize.x, screenSize.y}, Colour::rgb(0x05070C, 0.25f));
+
+    // The elements themselves are drawn by their own modules earlier this frame
+    // (ClickGui renders at kPriorityHighest, so it lands on top of them). Here
+    // we only add the editor chrome: frames, labels and the drag handling.
+    if (m_hudDragging && !input::InputManager::get().isDown(VK_LBUTTON))
+        m_hudDragging = nullptr;
+
+    const Vec2 cursor = m_cursor;
+
+    for (const auto& element : hud::elements()) {
+        Module* module = element.module;
+        hud::Draggable* drag = element.drag;
+        if (!module || !drag || !module->enabled() || !drag->placed())
+            continue;
+
+        const Rect bounds = drag->bounds();
+        const Vec2 size{bounds.width(), bounds.height()};
+
+        if (m_hudDragging == module) {
+            drag->moveTo({cursor.x - m_hudGrab.x, cursor.y - m_hudGrab.y}, size, screenSize);
+        }
+
+        const Rect frame = drag->bounds().inset(-4.0f * scale);
+        const bool hovered = frame.contains(cursor);
+        const bool active = m_hudDragging == module;
+
+        const Colour accent = theme.menuAccent();
+        DrawUtils::fill(frame, accent.withAlpha(active ? 0.16f : (hovered ? 0.10f : 0.05f)),
+                        6.0f * scale);
+        DrawUtils::outline(frame, accent.withAlpha(active ? 0.9f : (hovered ? 0.6f : 0.32f)),
+                           1.4f * scale, 6.0f * scale);
+
+        const float labelSize = 11.5f * scale;
+        const std::string label = module->name();
+        const float labelWidth = DrawUtils::textWidth(label, labelSize, Weight::SemiBold);
+
+        Rect tag{frame.left, frame.top - labelSize - 8.0f * scale, frame.left + labelWidth + 12.0f * scale,
+                 frame.top - 2.0f * scale};
+        if (tag.top < 0.0f)
+            tag = {frame.left, frame.bottom + 2.0f * scale, frame.left + labelWidth + 12.0f * scale,
+                   frame.bottom + labelSize + 8.0f * scale};
+
+        DrawUtils::fill(tag, Colour::rgb(0x05070C, 0.82f), 4.0f * scale);
+        DrawUtils::text(label, {tag.left + 6.0f * scale, tag.top + 3.0f * scale},
+                        active ? theme.textActive : theme.text, labelSize, Weight::SemiBold);
+
+        m_hits.push_back({frame, HitKind::Module, module, nullptr, module->category(), {}});
+    }
+
+    // Header strip: title, hint and the way out.
+    const float barHeight = 46.0f * scale;
+    const float barWidth = std::min(screenSize.x - 40.0f * scale, 520.0f * scale);
+    const Rect bar{(screenSize.x - barWidth) * 0.5f, 18.0f * scale,
+                   (screenSize.x + barWidth) * 0.5f, 18.0f * scale + barHeight};
+
+    hud::panel(bar, 10.0f * scale, scale);
+
+    DrawUtils::text("Edit HUD", {bar.left + 16.0f * scale, bar.top + 8.0f * scale},
+                    theme.textActive, 15.0f * scale, Weight::SemiBold);
+    DrawUtils::text("drag the elements to move them",
+                    {bar.left + 16.0f * scale, bar.top + 26.0f * scale}, theme.textDim,
+                    11.5f * scale, Weight::Regular);
+
+    const float buttonWidth = 84.0f * scale;
+    const float buttonHeight = 26.0f * scale;
+    const Rect done{bar.right - 14.0f * scale - buttonWidth,
+                    bar.top + (barHeight - buttonHeight) * 0.5f, bar.right - 14.0f * scale,
+                    bar.top + (barHeight + buttonHeight) * 0.5f};
+
+    if (renderButton(done, "Done", scale, theme.menuAccent()))
+        m_tooltip = "save the layout and go back";
+
+    m_hits.push_back({done, HitKind::HudEditorDone, nullptr, nullptr, Category::Client, {}});
+
+    bool anyEnabled = false;
+    for (const auto& element : hud::elements()) {
+        if (element.module && element.module->enabled()) {
+            anyEnabled = true;
+            break;
+        }
+    }
+
+    if (!anyEnabled) {
+        DrawUtils::text("No HUD element is enabled - turn one on under Interface",
+                        {screenSize.x * 0.5f, screenSize.y * 0.5f}, theme.textDim, 14.0f * scale,
+                        Weight::Regular, Align::Centre);
+    }
 }
 
 void ClickGui::renderCards(const Layout& layout, float amount) {
@@ -1263,6 +1430,14 @@ void ClickGui::handleClick(const Vec2& cursor, bool right) {
             m_configScroll.reset();
             break;
 
+        case HitKind::HudEditorTab:
+            beginHudEditor();
+            break;
+
+        case HitKind::HudEditorDone:
+            endHudEditor();
+            break;
+
         case HitKind::SearchField:
             m_page = Page::Modules;
             m_searching = true;
@@ -1357,12 +1532,30 @@ void ClickGui::handleClick(const Vec2& cursor, bool right) {
         }
 
         case HitKind::Module:
-            if (it->module) {
+            if (!it->module)
+                break;
+
+            // In the editor the same hit means "pick this element up".
+            if (m_hudEditor) {
                 if (right)
-                    m_expanded[it->module] = !m_expanded[it->module];
-                else
-                    it->module->toggle();
+                    break;
+
+                for (const auto& element : hud::elements()) {
+                    if (element.module != it->module || !element.drag)
+                        continue;
+
+                    const Rect bounds = element.drag->bounds();
+                    m_hudDragging = it->module;
+                    m_hudGrab = {cursor.x - bounds.left, cursor.y - bounds.top};
+                    break;
+                }
+                break;
             }
+
+            if (right)
+                m_expanded[it->module] = !m_expanded[it->module];
+            else
+                it->module->toggle();
             break;
 
         case HitKind::ConfigNameField:
@@ -1765,6 +1958,16 @@ void ClickGui::onChar(CharEvent& event) {
 void ClickGui::onKey(KeyEvent& event) {
     if (!m_open || !event.down)
         return;
+
+    // Escape leaves the layout mode rather than the whole menu, so the arranging
+    // and the closing are not the same gesture.
+    if (m_hudEditor) {
+        if (event.key == VK_ESCAPE) {
+            event.cancel();
+            endHudEditor();
+        }
+        return;
+    }
 
     const bool useKeyChars = !input::InputManager::characterInputAvailable();
 

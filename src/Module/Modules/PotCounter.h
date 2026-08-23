@@ -25,8 +25,6 @@ private:
     BoolSetting* m_background;
     FloatSetting* m_rounding;
 
-    FloatSetting* m_posX;
-    FloatSetting* m_posY;
     hud::Draggable m_drag;
 
     std::atomic<int> m_pots{0};

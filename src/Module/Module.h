@@ -9,6 +9,10 @@
 
 namespace anx1ous {
 
+namespace hud {
+class Draggable;
+}
+
 enum class Category {
     Visuals,
     Interface,
@@ -61,6 +65,11 @@ public:
     TextSetting* addText(std::string name, std::string description, std::string value);
     ListSetting* addList(std::string name, std::string description, std::string fromHint,
                          std::string toHint);
+
+    // Creates the hidden PosX/PosY settings for a HUD element, binds them to
+    // `drag`, and registers the element with the HUD editor. Negative defaults
+    // mean "position me in the top-right corner on first use".
+    void addHudPosition(hud::Draggable& drag, float defaultX = -1.0f, float defaultY = -1.0f);
 
 protected:
     virtual void onEnable() {}

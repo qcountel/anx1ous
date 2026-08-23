@@ -19,12 +19,11 @@ private:
     void onRender(Render2DEvent& event);
 
     EnumSetting* m_style;
+    TextSetting* m_text;
     BoolSetting* m_showFps;
     BoolSetting* m_rainbow;
     ColourSetting* m_colour;
 
-    FloatSetting* m_posX;
-    FloatSetting* m_posY;
     hud::Draggable m_drag;
 };
 

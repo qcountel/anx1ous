@@ -25,8 +25,6 @@ private:
     ColourSetting* m_colour;
     FloatSetting* m_rounding;
 
-    FloatSetting* m_posX;
-    FloatSetting* m_posY;
     hud::Draggable m_drag;
 
     gui::Animated m_lmbA, m_rmbA;

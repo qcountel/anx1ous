@@ -38,11 +38,7 @@ ArrayList::ArrayList() : Module("ArrayList", "Lists enabled modules", Category::
     m_background = addBool("Background", "Draw a panel behind the rows", true);
     m_speed = addFloat("Animation", "How quickly rows settle", 0.22f, 0.05f, 1.0f, 0.01f);
 
-    m_posX = addFloat("PosX", "", -1.0f, -1.0f, 1.0f, 0.0f);
-    m_posY = addFloat("PosY", "", -1.0f, -1.0f, 1.0f, 0.0f);
-    m_posX->onlyIf([] { return false; });
-    m_posY->onlyIf([] { return false; });
-    m_drag.bind(m_posX, m_posY);
+    addHudPosition(m_drag);
 
     listen<Render2DEvent>(&ArrayList::onRender);
     setEnabled(true);
